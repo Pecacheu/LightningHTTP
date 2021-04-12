@@ -1,11 +1,10 @@
-//LightningHTTP ©2020 Pecacheu; GNU GPL 3.0
+//LightningHTTP ©2021 Pecacheu; GNU GPL 3.0
 
 #include "http.h"
 #include <openssl/ssl.h>
 #include <sys/utsname.h>
 #include <csignal>
 
-using namespace utils;
 namespace http {
 
 string ServerStr = "LightningHTTP/"+string(HTTP_VERSION);
@@ -116,15 +115,16 @@ void HttpSocket::init() {
 	char b[HTTP_READ_SIZE]; uint8_t r,q=0; bool ka;
 	while(!srv->st && (r=run(b)) != 3) {
 		if(srv->opt.preRequest && !q) { //Pre Request:
-			q=srv->opt.preRequest(*this,req,eRes); if(q==2) break; if(q==1) r=1; q=1;
+			q=srv->opt.preRequest(*this,req,eRes);
+			if(q==2) break; if(q==1) r=0; q=1;
 		}
 		if(!req) break;
-		if(r == 1) { //Create Response:
+		if(r==1) { //Create Response:
 			if(srv->opt.onRequest) {
 				q=0,ka=0; auto kh = req->header.find("Connection");
 				if(kh != req->header.end()) ka = kh->second == "keep-alive";
-				HttpResponse *resp = new HttpResponse(*this,ka);
-				srv->opt.onRequest(*req, *resp); if(!resp->isEnded()) resp->end();
+				HttpResponse *res=new HttpResponse(*this,ka);
+				srv->opt.onRequest(*req,*res); if(!res->isEnded()) res->end();
 			} else sendCode(204, "No Application");
 		}
 	}
@@ -261,8 +261,15 @@ void HttpSocket::sendCode(uint16_t code, string msg) {
 	#if HTTP_DEBUG
 	error(name+" "+e);
 	#endif
-	eRes = new HttpResponse(*this,0);
+	eRes=new HttpResponse(*this,0);
 	if(srv) eRes->sendCode(code,msg,e); else eRes->writeHead(code,msg);
+}
+
+//------------ HttpRequest ------------
+
+HttpRequest::HttpRequest(HttpSocket& c, string& t, string& u, utils::stringmap& hd, uint16_t cd, utils::Buffer& n):
+cli(c),type(t),header(hd),content(n),code(cd),uri(u) {
+	ssize_t q=u.find('?'); if(q == string::npos) path=u,query=""; else path=u.substr(0,q),query=u.substr(q+1);
 }
 
 //------------ HttpResponse ------------
