@@ -3,14 +3,15 @@ High performance minimal C++ HTTP Server w/ HTTPS Support
 
 ### Dependencies:
 - C++14 & std library (including std::thread)
-- C++ utils.h & net.h
-- OpenSSL 1.1 or later
+- C-Utils & Net v2.2 or later
+- OpenSSL v1.1 or later
 - Optional: Linux sys/utsname.h
 
 ### Server Dependencies:
 - std::fstream (File read/write)
 - C++14 filesystem (General fs access. Can also use boost.filesystem)
 - Unix sys/inotify.h (Tracks filesystem changes)
+- Zlib (File compression)
 
 ## Namespace: http
 
@@ -73,8 +74,8 @@ Represents a request from a client (or the server response from httpOpenRequest)
 ### [class] HttpResponse
 Allows you to respond to the client (or send a request from httpOpenRequest). Do not call constructor.
 - `void setGzip(uint8_t gz)` Set the Content-Encoding header. *0 = plain, 1 = gzip, 2 = deflate*
-- `void setUseChunked(bool uc)` Enables chunked transfer mode.
-- `void setKeepAlive(bool ka)` Sets Connection to keep-alive.
+- `void setUseChunked(bool u)` Enables chunked transfer mode.
+- `void setKeepAlive(bool k)` Sets Connection to keep-alive.
 - `uint16_t getStat()` Get status code.
 - `string& getStatMsg()` Get status message.
 - `stringmap *getHeaders()` Get map of headers, or NULL if none set.
@@ -87,8 +88,35 @@ Allows you to respond to the client (or send a request from httpOpenRequest). Do
 - `bool end()` End response/send request. If `writeHead()` has not been called, default options are used. Returns true on success.
 - `HttpSocket& cli` The HttpSocket for this request. The HttpServer can be obtained with `cli.srv`.
 
+*Note: To set multiple cookies in the `Set-Cookie` header, separate them with `&`.*
+
 ### [class] HttpSocket
 Represents a client socket. Do not call any functions.
 - `HttpServer *srv` The server this socket belongs to.
 - `Socket cli` Underlying net::Socket instance.
 - `const string& name` Human-readable name for logging purposes.
+
+## Namespace: server
+An easy to use built-in web server engine included with LightningHTTP. Includes file parsing, URL parsing, rate limiting and more!
+
+### Costants
+- `stringmap ContentTypes` List of built-in HTTP content types. See `server.cpp` for full list.
+- `const string *tHtml,*tJs,*tCSS,*tWoff,*tWoff2,*tJpg` Convenient content type macros for use in `readCustom()`.
+
+### [struct] ServerOpt
+Used to set WebServer callbacks.
+- `HttpReqFunc onReq` Override for *onRequest* from HttpOptions. If `end()` is not called before this function ends, the server attempts to serve the request from the filesystem.
+- `HttpReqFunc postReq` Called after a request is complete. Useful for logging purposes.
+- `HttpPreFunc preReq` Sets *preRequest* callback from HttpOptions.
+- `void setHdr(HttpRequest& req, HttpResponse& res, stringmap& hd)` Called before the request is sent, allowing you to set custom headers. Does not fire if `onReq()` handled the request.
+- `Buffer readCustom(string f, CacheEntry& c, bool *zip)` Custom read callback, called every time a file changes. Return an empty buffer to perform a standard file read, or return a buffer of size `NPOS` to indicate an error.
+
+### [class] WebServer
+Represents a web server and it's HTTP/HTTPS instance.
+- `WebServer(string dir, size_t cm, ServerOpt& o)` Create a WebServer instance at `dir` is the root directory of the server, `cm` is the maximum file cache size.
+- `int init(string name, uint16_t port, uint16_t sPort=0, SSLList *sl=0)` Start the server. `sPort` is an optional HTTPS port, or 0 to disable HTTPS. If `sPort` is set, `sl` is required.
+- `void stop()` Stop the server.
+- `EventLoop evl` Internal event loop.
+
+### [struct] CacheEntry
+**Do not use.** Stores data used by the internal SmartCache system, which caches files to memory and automatically updates whenever a file is changed.
