@@ -1,11 +1,11 @@
 //LightningHTTP ©2021 Pecacheu; GNU GPL 3.0
 #pragma once
 
-#include "utils.h"
-#include "net.h"
+#include <utils.h>
+#include <net.h>
 
 #define HTTP_DEBUG 0
-#define HTTP_VERSION "3.3"
+#define HTTP_VERSION "3.4"
 #define HTTP_BACKLOG 50 //Pending Connection Buffer
 #define HTTP_THREADS 1000 //Max Cients
 #define HTTP_TIMEOUT 15

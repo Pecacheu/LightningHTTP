@@ -13,7 +13,8 @@ class WebServer;
 struct CacheEntry {
 	~CacheEntry(); void setName(string *n);
 	size_t update(WebServer& s, Buffer b, size_t cs, bool z);
-	const char *data=0,*db; size_t fs=0; string *hash=0,*type,*name; char zip;
+	const char *data=0,*db,*hash=0; size_t fs=0;
+	string *type,*name; char zip;
 };
 
 struct ServerOpt {
@@ -22,21 +23,23 @@ struct ServerOpt {
 	Buffer (*readCustom)(string f, CacheEntry& c, bool *zip)=0;
 };
 
+struct FSEvent;
 class WebServer {
-	public: WebServer(string d, size_t m, ServerOpt& o);
+	public: WebServer(string d, size_t cm, ServerOpt& o);
 	int init(string n, uint16_t port, uint16_t sPort=0, SSLList *sl=0);
 	void stop(int e=0); EventLoop evl; const size_t RootLen,CacheMax;
-	unordered_map<string,CacheEntry> FileCache;
+	CacheEntry *getFile(string n);
 	private: void onReq(HttpRequest& req, HttpResponse& resp);
-	const string Root; HttpServer *sr,*ss; const ServerOpt o;
+	const string Root; HttpServer *sr=0,*ss=0; const ServerOpt o;
 	//SmartCache:
-	size_t SEr=0,CacheSize=0; vector<HttpSocket*> ReadCache; mutex CW,CR;
+	size_t SEr=0,CacheSize=0; vector<HttpSocket*> ReadCache;
+	mutex CW,CR; unordered_map<string,CacheEntry> FileCache;
+	unordered_map<string,size_t> FRTimers;
 	void CRLock(HttpRequest& r); void CRUnlk(HttpRequest& r);
-	CacheEntry *resolve(string& uri);
-	//File Read:
-	void CWLock(); void CWUnlk();
-	void cacheAddDir(string path, bool fr=0);
-	void cacheInsert(string path, bool fr);
+	CacheEntry *resolve(string& uri); void CWLock(); void CWUnlk();
+	void onFileChg(FSEvent e); void fileRecalc(void *p);
+	void cacheAddDir(string path, bool fr=0); void cacheRemDir(string& p);
+	void cacheInsert(string path, bool fr); void cacheDelete(string n);
 };
 
 }

@@ -99,7 +99,7 @@ Represents a client socket. Do not call any functions.
 ## Namespace: server
 An easy to use built-in web server engine included with LightningHTTP. Includes file parsing, URL parsing, rate limiting and more!
 
-### Costants
+### Constants
 - `stringmap ContentTypes` List of built-in HTTP content types. See `server.cpp` for full list.
 - `const string *tHtml,*tJs,*tCSS,*tWoff,*tWoff2,*tJpg` Convenient content type macros for use in `readCustom()`.
 

@@ -315,9 +315,10 @@ bool HttpResponse::writeHead(const char *path, const char *method, stringmap *he
 
 bool HttpResponse::write(Buffer b) {
 	if(ended || !b.buf) return 0;
+	const char *d=b.db; b.db=0;
 	if(uC) { if(!stat || cli.write(genChunk(b)) <= 0) return 0; }
-	else { const char *d=b.db; b.db=0; cont=Append::buf(cont,b); b.db=d; }
-	return 1;
+	else cont=Append::buf(cont,b);
+	b.db=d; return 1;
 }
 
 Buffer HttpResponse::genHeader() {
