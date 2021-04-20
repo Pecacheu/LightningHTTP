@@ -1,4 +1,4 @@
-//LightningHTTP Server ©2021 Pecacheu; GNU GPL 3.0
+//LightningHTTP v3.4.1 ©2021 Pecacheu; GNU GPL 3.0
 #pragma once
 
 #include "http.h"
@@ -36,7 +36,7 @@ class WebServer {
 	mutex CW,CR; unordered_map<string,CacheEntry> FileCache;
 	unordered_map<string,size_t> FRTimers;
 	void CRLock(HttpRequest& r); void CRUnlk(HttpRequest& r);
-	CacheEntry *resolve(string& uri); void CWLock(); void CWUnlk();
+	CacheEntry *resolve(string& u); void CWLock(); void CWUnlk();
 	void onFileChg(FSEvent e); void fileRecalc(void *p);
 	void cacheAddDir(string path, bool fr=0); void cacheRemDir(string& p);
 	void cacheInsert(string path, bool fr); void cacheDelete(string n);

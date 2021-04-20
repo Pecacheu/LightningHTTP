@@ -13,6 +13,15 @@ High performance minimal C++ HTTP Server w/ HTTPS Support
 - Unix sys/inotify.h (Tracks filesystem changes)
 - Zlib (File compression)
 
+### Wish list, may be coming in the future:
+- HTTP/2 implementation
+	- Header compression
+	- Data streams replace chunked transfer encoding
+	- Allows applications to support ahead-of-time content push
+- Implement request push in Server lib through some per-file config mechanism (similar to how +HEADER+ works)
+- In Server lib, `404.html` file replaces default 404 screen.
+- QUIC protocol support
+
 ## Namespace: http
 
 ### Macros

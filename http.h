@@ -1,4 +1,4 @@
-//LightningHTTP ©2021 Pecacheu; GNU GPL 3.0
+//LightningHTTP v3.4.1 ©2021 Pecacheu; GNU GPL 3.0
 #pragma once
 
 #include <utils.h>

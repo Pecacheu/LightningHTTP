@@ -1,4 +1,4 @@
-//LightningHTTP Server ©2021 Pecacheu; GNU GPL 3.0
+//LightningHTTP ©2021 Pecacheu; GNU GPL 3.0
 
 #include "server.h"
 #include <unordered_set>
@@ -39,9 +39,7 @@ class FileWatcher {
 };
 
 int FileWatcher::init(FWFunc f) { if(Run) return -1; EV=f; return np=inotify_init(); }
-void FileWatcher::stop() {
-	Run=0; fl.lock(); if(np) close(np); np=0; fl.unlock();
-}
+void FileWatcher::stop() { Run=0; fl.lock(); if(np) close(np); np=0; fl.unlock(); }
 
 int FileWatcher::watch(string fp, bool rc) {
 	fl.lock(); for(auto& p: Paths) if(fp == p.second.path) { fl.unlock(); return 0; }
@@ -133,7 +131,7 @@ Buffer readFile(string& p) {
 //--------------------------------------------------------------------------------------------------
 
 WebServer::WebServer(string d, size_t cm, ServerOpt& o):Root(d),RootLen(d.size()),CacheMax(cm),o(o) {}
-void WebServer::stop(int e) { SEr=e; evl.stop(); }
+void WebServer::stop(int e) { SEr=e||999; evl.stop(); }
 
 int WebServer::init(string n, uint16_t port, uint16_t sPort, SSLList *sl) {
 	if((!port && !sPort) || (sPort && !sl)) return -1;
@@ -147,9 +145,9 @@ int WebServer::init(string n, uint16_t port, uint16_t sPort, SSLList *sl) {
 	FileWatcher fw; if(ckErr(fw.init(bind(&WebServer::onFileChg,this,_1)),"fwInit")) return -5;
 	if(ckErr(fw.watch(Root,1),"fWatch")) return -6;
 	//Run EventLoop:
-	evl.run(); cout << "Stopping "+n+" Server...\n";
+	if(!SEr) evl.run(); cout << "Stopping "+n+" Server...\n";
 	fw.stop(); if(sr) sr->stop(); if(ss) ss->stop();
-	this_thread::sleep_for(50ms); return SEr;
+	this_thread::sleep_for(50ms); return SEr==999?0:SEr;
 }
 
 #define setHd if(o.setHdr) o.setHdr(req,res,hd)
@@ -224,13 +222,14 @@ void CacheEntry::setName(string *n) {
 	name=n,type=(i==CTEnd?0:(string*)&i->second);
 }
 
-CacheEntry *WebServer::resolve(string& uri) {
-	size_t l=uri.size(); auto fe=FileCache.end();
-	if(l == 1 && uri[l-1] == '/') uri = "/index.html"; else if(l <= 1) return 0;
-	CacheEntry *c=getFile(uri); if(c) return c;
-	if(uri.find('.',2) == NPOS) {
-		c=getFile(uri+".html"); if(c) return c;
-		c=getFile(uri+"/index.html"); if(c) return c;
+CacheEntry *WebServer::resolve(string& u) {
+	size_t l=u.size(); if(!l || u[0] != '/') return 0;
+	if(l==1) return getFile("/index.html");
+	u=decodeURIComponent(u);
+	CacheEntry *c=getFile(u); if(c) return c;
+	if(u.find('.',2) == NPOS) {
+		c=getFile(u+".html"); if(c) return c;
+		c=getFile(u+"/index.html"); if(c) return c;
 	}
 	return 0;
 }
@@ -261,25 +260,25 @@ inline void WebServer::CWUnlk() { CW.unlock(); }
 //Detect Changes:
 
 struct FRData {
-	FRData(string n, bool i):n(n),in(i) {} string n; bool in=0;
+	FRData(string n, bool c):n(n),cr(c) {} string n; bool cr;
 };
 
 void WebServer::onFileChg(FSEvent e) {
-	uint32_t& m=e.mask; bool in,dir=m&IN_ISDIR; string n=e.name.substr(RootLen);
-	if(m & (IN_MODIFY | IN_CLOSE_WRITE | IN_CREATE | IN_MOVED_TO)) in=1;
-	else if(m & (IN_DELETE | IN_MOVED_FROM)) in=0; else return;
+	uint32_t& m=e.mask; bool cr,dir=m&IN_ISDIR; string n=e.name.substr(RootLen);
+	if(m & (IN_MODIFY | IN_CLOSE_WRITE | IN_CREATE | IN_MOVED_TO)) cr=1;
+	else if(m & (IN_DELETE | IN_MOVED_FROM)) cr=0; else return;
 	if(dir) {
-		if(in) cacheAddDir(n); else cacheRemDir(n);
+		if(cr) cacheAddDir(n); else cacheRemDir(n);
 		cout << "File Cache: " << (CacheSize/1000.f) << "KB\n";
 	} else {
-		FRData *d=new FRData(n,in); size_t& t=FRTimers[n]; if(t) evl.clearTimeout(t);
+		FRData *d=new FRData(n,cr); size_t& t=FRTimers[n]; if(t) evl.clearTimeout(t);
 		t=evl.setTimeout(bind(&WebServer::fileRecalc,this,_1),300,d);
 	}
 }
 
 void WebServer::fileRecalc(void *p) {
 	FRData *d=(FRData*)p; FRTimers[d->n]=0;
-	CWLock(); if(d->in) cacheInsert(Root+d->n,0); else cacheDelete(d->n); CWUnlk();
+	CWLock(); if(d->cr) cacheInsert(Root+d->n,0); else cacheDelete(d->n); CWUnlk();
 	delete d; cout << "File Cache: " << (CacheSize/1000.f) << "KB\n";
 }
 
@@ -291,13 +290,12 @@ void WebServer::cacheAddDir(string path, bool fr) {
 		string f=p.path().generic_string(); if(f[RootLen+1] == '+') cacheInsert(f,1); //Headers first
 	}
 	for(auto& p: fs::recursive_directory_iterator(Root+path))
-		if(fs::is_regular_file(p.status())) cacheInsert(p.path().generic_string(),fr);
+		if(fs::is_regular_file(p.status())) { cacheInsert(p.path().generic_string(),fr); if(SEr) return; }
 	CWUnlk();
 }
-//TODO: Full URL Encode instead of replaceAll
 void WebServer::cacheInsert(string f, bool fr) {
 	//Create new CacheEntry if none exists:
-	string n=f.substr(RootLen); replaceAll(n," ","%20"); auto fi=FileCache.emplace(n,CacheEntry());
+	string n=f.substr(RootLen); auto fi=FileCache.emplace(n,CacheEntry());
 	auto& e=*fi.first; CacheEntry& c=e.second; if(fi.second) c.setName((string*)&e.first);
 	//Read file:
 	bool z = !c.type || !(c.type == tWoff || c.type == tWoff2 || c.type == tWoff2
