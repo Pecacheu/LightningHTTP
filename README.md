@@ -14,6 +14,7 @@ High performance minimal C++ HTTP Server w/ HTTPS Support
 - Zlib (File compression)
 
 ### Wish list, may be coming in the future:
+- Setting (in HttpOptions) to allow direct read-from-disk when SmartCache is full
 - HTTP/2 implementation
 	- Header compression
 	- Data streams replace chunked transfer encoding
@@ -106,7 +107,7 @@ Represents a client socket. Do not call any functions.
 - `const string& name` Human-readable name for logging purposes.
 
 ## Namespace: server
-An easy to use built-in web server engine included with LightningHTTP. Includes file parsing, URL parsing, rate limiting and more!
+An easy to use built-in web server engine included with LightningHTTP. Includes file parsing, URL parsing, SmartCache (RAM Cache system) with smart compression (only activates when file has a good compression ratio), and rate limiting!
 
 ### Constants
 - `stringmap ContentTypes` List of built-in HTTP content types. See `server.cpp` for full list.
