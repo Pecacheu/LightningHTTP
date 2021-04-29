@@ -109,7 +109,7 @@ void HttpSocket::init() {
 			#if HTTP_DEBUG
 			cout << name+" SSL Error " << SSL_get_error(s,e) << '\n';
 			#endif
-			cclose(); return;
+			cclose(); delete this; return;
 		}
 	}
 	char b[HTTP_READ_SIZE]; char r,q=0; bool ka;
@@ -125,7 +125,7 @@ void HttpSocket::init() {
 				q=0,ka=0; auto kh = req->header.find("Connection");
 				if(kh != req->header.end()) ka = kh->second == "keep-alive";
 				HttpResponse *res=new HttpResponse(*this,ka);
-				srv->opt.onRequest(*req,*res); if(!res->isEnded()) res->end();
+				srv->opt.onRequest(*req,*res); res->end();
 				ka=res->kA; delete req; delete res; cBuf.del(); if(!ka) break;
 			} else sendCode(204, "No Application");
 		}
@@ -137,10 +137,9 @@ bool HttpSocket::initCli(bool https, HttpResFunc& cb) {
 	HttpResponse *cr=eRes;
 	if(https) {
 		SSL *s = SSL_new(CliCTX); SSL_set_fd(s,cli.sck); ssl=s;
-		SSL_set_tlsext_host_name(s, cli.addr.host);
+		SSL_set_tlsext_host_name(s,cli.addr.host.data());
 		X509_VERIFY_PARAM *p = SSL_get0_param(s);
-		//X509_VERIFY_PARAM_set_hostflags(p, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-		X509_VERIFY_PARAM_set1_host(p, cli.addr.host, 0);
+		X509_VERIFY_PARAM_set1_host(p,cli.addr.host.data(),0);
 		if(SSL_connect(s) <= 0) {
 			error("SSL "+name,-1); cb(-5,0,0);
 			cclose(); delete cr; delete this; return 0;
@@ -160,7 +159,7 @@ bool HttpSocket::initCli(bool https, HttpResFunc& cb) {
 }
 
 char HttpSocket::run(char *b) {
-	ssize_t len = read(b, HTTP_READ_SIZE);
+	ssize_t len=read(b, HTTP_READ_SIZE);
 	if(len <= 0) {
 		#if HTTP_DEBUG
 		if(!len || errno == EBADF) cout << name+" Connection Closed\n";
@@ -251,6 +250,7 @@ inline ssize_t HttpSocket::read(char *buf, size_t len) {
 	if(cli.err) return 0; return ssl?SSL_read((SSL*)ssl,buf,len):cli.read(buf,len);
 }
 inline ssize_t HttpSocket::write(Buffer b) {
+	if(cli.err) { b.del(); return 0; }
 	#if HTTP_DEBUG > 2
 	char *cs = (char*)b.toCStr(1);
 	for(size_t i=0,l=b.len-3; i<l; i++) if(cs[i] == '\r' && cs[i+1] == '\n'
@@ -335,7 +335,7 @@ Buffer HttpResponse::genHeader() {
 	}
 	if(gzip) hd["Content-Encoding"] = gzip==2?"deflate":"gzip";
 	if(uC) hd["Transfer-Encoding"] = "chunked";
-	else if(cl) hd["Content-Length"] = to_string(cont.len); else cont.len=0;
+	else if(cl) hd["Content-Length"] = to_string(cont.len); else cont.del();
 	if(kA) {
 		hd["Connection"] = "keep-alive";
 		if(!cm) hd["Keep-Alive"] = "timeout="+to_string(HTTP_TIMEOUT);

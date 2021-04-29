@@ -115,6 +115,7 @@ An easy to use built-in web server engine included with LightningHTTP. Includes 
 
 ### [struct] ServerOpt
 Used to set WebServer callbacks.
+- `bool chkMode=1` Sets if chunked transfer mode is on by default.
 - `HttpReqFunc onReq` Override for *onRequest* from HttpOptions. If `end()` is not called before this function ends, the server attempts to serve the request from the filesystem.
 - `HttpReqFunc postReq` Called after a request is complete. Useful for logging purposes.
 - `HttpPreFunc preReq` Sets *preRequest* callback from HttpOptions.
@@ -130,3 +131,37 @@ Represents a web server and it's HTTP/HTTPS instance.
 
 ### [struct] CacheEntry
 **Do not use.** Stores data used by the internal SmartCache system, which caches files to memory and automatically updates whenever a file is changed.
+
+## Simple Server Example
+
+```c++
+#include <server.h>
+#include <unistd.h>
+#include <csignal>
+
+#define PORT 80
+#define SPORT 443
+#define ROOT "./root"
+
+using namespace server;
+
+size_t getRam() {
+	return sysconf(_SC_PHYS_PAGES)*sysconf(_SC_PAGE_SIZE);
+}
+const size_t SystemRam=getRam(), CacheMax=SystemRam/4; //8GB RAM -> 2GB Cache
+WebServer *sv;
+
+void onSig(int s) { sv->stop(); }
+int main(int argc, char *argv[]) {
+	signal(SIGTERM, onSig); signal(SIGINT, onSig);
+	cout << "DATE: " << getDate() << ", RAM: " << (SystemRam/1000000)
+		<< "MB, Max Cache: " << (CacheMax/1000000) << "MB\n";
+
+	ServerOpt o;
+	sv = new WebServer(ROOT,CacheMax,o);
+
+	SSLList sl(1);
+	if(ckErr(sl.add("test.crt", "test.key", "example.com"),"Cert Load")) return 1;
+	return sv->init("Test",PORT,SPORT,&sl);
+}
+```

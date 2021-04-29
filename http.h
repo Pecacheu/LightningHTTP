@@ -5,7 +5,7 @@
 #include <net.h>
 
 #define HTTP_DEBUG 0
-#define HTTP_VERSION "3.4"
+#define HTTP_VERSION "3.5"
 #define HTTP_BACKLOG 50 //Pending Connection Buffer
 #define HTTP_THREADS 1000 //Max Cients
 #define HTTP_TIMEOUT 15
@@ -57,8 +57,8 @@ class HttpSocket {
 	public: HttpServer *srv; Socket cli; const string name;
 	HttpSocket(HttpServer& s, Socket c); HttpSocket(Socket c);
 	void init(); bool initCli(bool https, HttpResFunc& cb);
-	void cclose(); ssize_t write(Buffer b);
-	private: char run(char *b); char parse(Buffer b);
+	ssize_t write(Buffer b);
+	private: void cclose(); char run(char *b); char parse(Buffer b);
 	char bCopy(const char *buf, size_t len, size_t *rs=0);
 	char parseChunk(const char *buf, size_t len);
 	ssize_t read(char *buf, size_t len);

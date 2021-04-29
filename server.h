@@ -18,7 +18,7 @@ struct CacheEntry {
 };
 
 struct ServerOpt {
-	HttpReqFunc onReq=0,postReq=0; HttpPreFunc preReq=0;
+	bool chkMode=1; HttpReqFunc onReq=0,postReq=0; HttpPreFunc preReq=0;
 	void (*setHdr)(HttpRequest& req, HttpResponse& res, stringmap& hd)=0;
 	Buffer (*readCustom)(string f, CacheEntry& c, bool *zip)=0;
 };

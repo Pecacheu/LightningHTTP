@@ -154,6 +154,7 @@ int WebServer::init(string n, uint16_t port, uint16_t sPort, SSLList *sl) {
 #define endRq if(o.postReq) o.postReq(req,res); return
 void WebServer::onReq(HttpRequest& req, HttpResponse& res) {
 	//Handle special:
+	res.setUseChunked(o.chkMode);
 	if(o.onReq) { o.onReq(req,res); if(res.isEnded()) { endRq; }}
 	if(req.path.size() > 1 && req.path[1] == '+') {
 		res.sendCode(404,"Not Found"); endRq;
@@ -167,8 +168,8 @@ void WebServer::onReq(HttpRequest& req, HttpResponse& res) {
 		if(c.hash) {
 			auto mh = req.header.find("If-None-Match");
 			if(mh != req.header.end() && mh->second == c.hash) {
-				setHd; res.writeHead(304,&hd); res.end();
-				CRUnlk(req); endRq;
+				setHd; res.setUseChunked(0); res.writeHead(304,&hd);
+				res.end(); CRUnlk(req); endRq;
 			}
 			hd["ETag"] = c.hash;
 		}
@@ -184,7 +185,7 @@ void WebServer::onReq(HttpRequest& req, HttpResponse& res) {
 			mr=1; hd["Content-Range"] = "bytes "+s+"-"+to_string(c.fs-1)+"/"+to_string(c.fs);
 			cout << ">>>> BYTE OFS "+s+"\n";
 		}
-		if(c.zip) res.setGzip(c.zip); res.setUseChunked(1); setHd;
+		if(c.zip) res.setGzip(c.zip); setHd;
 		res.writeHead(mr?206:200,&hd); res.write(Buffer(c.data+ofs,c.fs-ofs)); res.end();
 	} else res.sendCode(404, "Not Found", "Error: File Known but Not Cached");
 	CRUnlk(req); endRq;
@@ -248,9 +249,9 @@ void WebServer::CRUnlk(HttpRequest& r) {
 
 void WebServer::CWLock() {
 	CW.lock(); CR.lock(); size_t n=ReadCache.size(); CR.unlock();
-	if(n) {
-		cout << to_string(n)+"T waiting for update 200ms...\n";
-		this_thread::sleep_for(200ms); //If open clients, wait for grace period.
+	if(n) { //If open clients, wait grace period.
+		cout << to_string(n)+"T waiting for update 2s...\n";
+		this_thread::sleep_for(2s);
 		CR.lock(); for(auto& i: ReadCache) (*i).cli.close(); CR.unlock();
 		this_thread::yield(); //Wait for client threads to exit.
 	}
