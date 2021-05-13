@@ -5,7 +5,7 @@
 #include <net.h>
 
 #define HTTP_DEBUG 0
-#define HTTP_VERSION "3.5"
+#define HTTP_VERSION "3.6"
 #define HTTP_BACKLOG 50 //Pending Connection Buffer
 #define HTTP_THREADS 1000 //Max Cients
 #define HTTP_TIMEOUT 15

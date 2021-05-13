@@ -104,8 +104,9 @@ void HttpSocket::init() {
 	cout << name+" Thread 0x" << hex << this_thread::get_id() << dec << '\n';
 	#endif
 	if(srv->sl) {
-		SSL *s = SSL_new((SSL_CTX*)srv->sl->s[0]); SSL_set_fd(s,cli.sck); ssl=s;
-		int e=SSL_accept(s); if(e <= 0) {
+		int e; SSL *s=SSL_new((SSL_CTX*)srv->sl->s[0]);
+		if(s) { SSL_set_fd(s,cli.sck); ssl=s; e=SSL_accept(s); }
+		if(!s || e <= 0) {
 			#if HTTP_DEBUG
 			cout << name+" SSL Error " << SSL_get_error(s,e) << '\n';
 			#endif
@@ -171,7 +172,8 @@ char HttpSocket::run(char *b) {
 		else error(name,len); return 3;
 	}
 	#if HTTP_DEBUG > 2
-	cout << "\n<<IN "+to_string(len)+"b "+name+">>\n"+string(b,len)+"\n<<IN END>>\n";
+	string s=string(b,len); replaceAll(s,"\r","<\\r>"); replaceAll(s,"\n","<\\n>\n");
+	cout << "\n<<IN "+to_string(len)+"b "+name+">>\n"+s+"<<IN END>>\n";
 	#elif HTTP_DEBUG > 1
 	cout << name+" IN "+to_string(len)+"\n";
 	#endif
@@ -252,15 +254,12 @@ inline ssize_t HttpSocket::read(char *buf, size_t len) {
 inline ssize_t HttpSocket::write(Buffer b) {
 	if(cli.err) { b.del(); return 0; }
 	#if HTTP_DEBUG > 2
-	char *cs = (char*)b.toCStr(1);
-	for(size_t i=0,l=b.len-3; i<l; i++) if(cs[i] == '\r' && cs[i+1] == '\n'
-	&& cs[i+2] == '\r' && cs[i+3] == '\n') { cs[i+2]=cs[i+3]='>'; cs[i+4]=0; break; }
-	cout << "\n<<OUT "+to_string(b.len)+"b "+name+">>\n"+cs+"\n<<OUT END>>\n";
-	delete[] cs;
+	string s=b.toStr(); replaceAll(s,"\r","<\\r>"); replaceAll(s,"\n","<\\n>\n");
+	cout << "\n<<OUT "+to_string(b.len)+"b "+name+">>\n"+s+"<<OUT END>>";
 	#elif HTTP_DEBUG > 1
 	cout << name+" OUT "+to_string(b.len);
 	#endif
-	ssize_t n = ssl?SSL_write((SSL*)ssl,b.buf,b.len):cli.write(b.buf,b.len);
+	ssize_t n=ssl?SSL_write((SSL*)ssl,b.buf,b.len):cli.write(b.buf,b.len);
 	#if HTTP_DEBUG > 1
 	cout << " WRITE "+to_string(n)+"\n";
 	#endif
@@ -315,10 +314,10 @@ bool HttpResponse::writeHead(const char *path, const char *method, stringmap *he
 
 bool HttpResponse::write(Buffer b) {
 	if(ended || !b.buf) return 0;
-	const char *d=b.db; b.db=0;
-	if(uC) { if(!stat || cli.write(genChunk(b)) <= 0) return 0; }
+	bool s=1; const char *d=b.db; b.db=0;
+	if(uC) { if(!stat || cli.write(genChunk(b)) <= 0) s=0; }
 	else cont=Append::buf(cont,b);
-	b.db=d; return 1;
+	b.db=d; return s;
 }
 
 Buffer HttpResponse::genHeader() {
