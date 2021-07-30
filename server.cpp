@@ -202,16 +202,16 @@ stringmap ContentTypes({
 	{"png",		"image/png"},
 	{"jpg",		"image/jpeg"},
 	{"svg",		"image/svg+xml"},
-	{"js",		"application/javascript"},
+	{"js",		"text/javascript"},
 	{"pdf",		"application/pdf"},
 	{"mp3",		"audio/mpeg"},
 	{"mp4",		"video/mp4"},
 	{"ogg",		"video/ogg"},
 	{"webm",	"video/webm"},
-	{"otf",		"application/opentype"},
-	{"ttf",		"application/truetype"},
-	{"woff",	"application/font-woff"},
-	{"woff2",	"application/font-woff2"}
+	{"otf",		"font/otf"},
+	{"ttf",		"font/ttf"},
+	{"woff",	"font/woff"},
+	{"woff2",	"font/woff2"}
 });
 
 const string *tHtml=&ContentTypes["html"], *tJs=&ContentTypes["js"], *tCSS=&ContentTypes["css"],
