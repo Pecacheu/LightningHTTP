@@ -135,7 +135,6 @@ void HttpSocket::init() {
 }
 
 bool HttpSocket::initCli(bool https, HttpResFunc& cb) {
-	HttpResponse *cr=eRes;
 	if(https) {
 		SSL *s = SSL_new(CliCTX); SSL_set_fd(s,cli.sck); ssl=s;
 		SSL_set_tlsext_host_name(s,cli.addr.host.data());
@@ -143,10 +142,10 @@ bool HttpSocket::initCli(bool https, HttpResFunc& cb) {
 		X509_VERIFY_PARAM_set1_host(p,cli.addr.host.data(),0);
 		if(SSL_connect(s) <= 0) {
 			error("SSL "+name,-1); cb(-5,0,0);
-			cclose(); delete cr; delete this; return 0;
+			cclose(); delete this; return 0;
 		}
 	}
-	thread([this,cb,cr]() {
+	thread([this,cb]() {
 		char b[HTTP_READ_SIZE]; char r;
 		while(!(r=run(b)));
 		if(r==1) cb(0,req,0); else if(r==2) {
@@ -155,7 +154,7 @@ bool HttpSocket::initCli(bool https, HttpResFunc& cb) {
 			cb(s,0,&m); delete eRes;
 		} else cb(-6,0,0);
 		cclose(); cBuf.del();
-		delete req; delete cr; delete this;
+		delete req; delete this;
 	}).detach(); return 1;
 }
 
