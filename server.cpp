@@ -5,8 +5,13 @@
 #include <experimental/filesystem>
 #include <fstream>
 #include <sys/inotify.h>
+#include <unistd.h>
 #include <openssl/md5.h>
-#include <zlib.h>
+
+#if __has_include(<zlib.h>)
+	#include <zlib.h>
+	#define ZLIB
+#endif
 
 using namespace utils;
 namespace fs = experimental::filesystem;
@@ -108,23 +113,24 @@ string fileExt(string& f) {
 	return f.find('/',p+1)==NPOS?f.substr(p+1):"";
 }
 
-/*bool fileExists(string& p) {
-	struct stat s; return stat(p.c_str(), &s) == 0;
+bool fileExists(string& p) {
+	return fs::is_regular_file(p);
 }
 
-int writeFile(string& p, Buffer& b) {
-	ofstream f(p, ios::binary); if(!f.is_open()) return -1;
-	f.write(b.buf,b.len); ios_base::iostate e = f.rdstate();
-	f.close(); return e==ios::failbit?-2:(e?-3:0);
-}*/
-
 Buffer readFile(string& p) {
+	if(!fileExists(p)) return Buffer(NPOS);
 	ifstream f(p, ios::binary|ios::ate);
 	if(!f.is_open()) return Buffer(NPOS);
 	size_t l = f.tellg(); char *d=new char[l];
 	f.seekg(0); f.read(d,l); f.close();
 	return Buffer(d,l);
 }
+
+/*int writeFile(string& p, Buffer& b) {
+	ofstream f(p, ios::binary); if(!f.is_open()) return -1;
+	f.write(b.buf,b.len); ios_base::iostate e = f.rdstate();
+	f.close(); return e==ios::failbit?-2:(e?-3:0);
+}*/
 
 //--------------------------------------------------------------------------------------------------
 //----------------------------------------- Server -------------------------------------------------
@@ -329,6 +335,7 @@ const char *md5hash(Buffer& b) {
 	size_t l=strlen(c+1); c[0]=c[l+1]='"'; c[l+2]=0; return c;
 }
 
+#ifdef ZLIB
 Buffer zlibCompress(Buffer d, bool gzip) {
 	z_stream str; str.zalloc=0; str.zfree=0; str.opaque=0;
 	if(ckErr(deflateInit2(&str, 9, Z_DEFLATED, gzip?31:15, 9, Z_DEFAULT_STRATEGY),"zLib deflateInit2")) return Buffer();
@@ -343,6 +350,7 @@ Buffer zlibCompress(Buffer d, bool gzip) {
 		}
 	}
 }
+#endif
 
 size_t CacheEntry::update(WebServer& s, Buffer b, size_t cs, bool z) {
 	if(data) { delete[] db; cs-=fs; } if(b.len<100) z=0;
@@ -355,13 +363,17 @@ size_t CacheEntry::update(WebServer& s, Buffer b, size_t cs, bool z) {
 			} else { z=0,b=Append::buf("File Error '",hn,"'"); }
 		}
 	}
-	zip=z?1:0; //1 = Gzip Header, 2 = Zlib Header
+	#ifdef ZLIB
+	zip=z?ZLIB_MODE:0;
 	if(z) { //Compress:
 		cout << "\033[33m--> ZLIB " << *name;
 		Buffer bo=b; b=zlibCompress(b,zip==1); float cr=b.len/(float)bo.len;
 		if(cr > 0.95) { b.del(); b=bo,zip=0; } else bo.del();
 		cout << (zip?"":"\033[31m") << " RATIO " << cr << "\033[0m\n";
 	}
+	#else
+	zip=0;
+	#endif
 	//Update Data:
 	size_t ncs=cs+(fs=b.len); bool c = fs && ncs < s.CacheMax;
 	delete[] hash; if(c) data=b.buf,db=b.db,hash=md5hash(b); else data=0,db=0,hash=0;

@@ -1,13 +1,19 @@
-//LightningHTTP v3.6.2 ©2021 Pecacheu; GNU GPL 3.0
+//LightningHTTP v3.6.4 ©2021 Pecacheu; GNU GPL 3.0
 #pragma once
 
 #include "http.h"
+
+#define ZLIB_MODE 1 //0 = Disable Zip, 1 = Gzip Header, 2 = Zlib Header
 
 namespace server {
 using namespace http;
 
 extern stringmap ContentTypes;
 extern const string *tHtml,*tJs,*tCSS,*tWoff,*tWoff2,*tJpg;
+
+string fileExt(string& f);
+bool fileExists(string& p);
+Buffer readFile(string& p);
 
 class WebServer;
 struct CacheEntry {

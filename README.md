@@ -1,17 +1,17 @@
 # LightningHTTP
-High performance minimal C++ HTTP Server w/ HTTPS Support
+High performance minimal C++ HTTP Server w/ HTTPS Support. A ready-to-go implementation of this library [can be found here](https://github.com/Pecacheu/LightningServer).
 
 ### Dependencies:
-- C++14 & std library (including std::thread)
-- C-Utils & Net v2.2 or later
+- C++17 & std library (including std::thread)
+- C-Utils v2.2 or later
 - OpenSSL v1.1 or later
-- Optional: Linux sys/utsname.h
+- *Optional:* Linux sys/utsname.h
 
 ### Server Dependencies:
 - std::fstream (File read/write)
-- C++14 filesystem (General fs access. Can also use boost.filesystem)
+- C++ filesystem (General fs access. Could use boost.filesystem)
 - Unix sys/inotify.h (Tracks filesystem changes)
-- Zlib (File compression)
+- *Optional:* Zlib (File compression)
 
 ### Wish list, may be coming in the future:
 - Setting (in HttpOptions) to allow direct read-from-disk when SmartCache is full

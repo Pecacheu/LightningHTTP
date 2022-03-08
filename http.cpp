@@ -2,8 +2,12 @@
 
 #include "http.h"
 #include <openssl/ssl.h>
-#include <sys/utsname.h>
 #include <csignal>
+
+#if __has_include(<sys/utsname.h>)
+	#define HTTP_UTSNAME
+	#include <sys/utsname.h>
+#endif
 
 namespace http {
 
@@ -16,6 +20,7 @@ void httpInit() {
 	SSL_load_error_strings(); OpenSSL_add_ssl_algorithms();
 	SrvSSL = TLS_server_method(), CliSSL = TLS_method();
 	CliCTX = createSSLClientContext();
+	#ifdef HTTP_UTSNAME
 	utsname os; if(!ckErr(uname(&os),"httpOSCheck {NON FATAL}")) {
 		ServerStr += ((string)" (")+
 		#ifdef HTTP_SEND_NAME
@@ -23,6 +28,7 @@ void httpInit() {
 		#endif
 		os.sysname+" "+(ARCH64?"x64":os.machine)+")";
 	}
+	#endif
 	signal(SIGPIPE, SIG_IGN); atexit(httpExit);
 }
 
@@ -189,7 +195,7 @@ char HttpSocket::parse(Buffer r) {
 		char d=bCopy(r.buf,r.len); return d;
 	}
 	req=0,eRes=0; if(r.len < 23) return 3; //Parse HTTP Headers:
-	string t,u,hk,hv; stringmap hd; bool ph=1,nl=0; size_t cl=0,cd=0;
+	string t,u,hk,hv; stringmap hd; bool ph=1,nl=0; size_t cl=NPOS,cd=0;
 	size_t i,o=0,sl=strlen(HTTP_NEWLINE); const char *rb=r.buf; chk=0;
 	while((i=bFind(r,HTTP_NEWLINE,o)) != NPOS) {
 		Buffer b=Buffer(rb+o,i-o); o=i+sl;
@@ -211,13 +217,14 @@ char HttpSocket::parse(Buffer r) {
 			size_t hs=bFind(b,":"); if(hs > 50 || hs < 3) { sendCode(400, "Invalid Header"); return 2; }
 			if(b.len-hs < 3) continue; hk=toCamelCase(b.toStr(0,hs)), hv=b.toStr(hs+2);
 			if(hk == "Content-Length") {
-				cl=strToUint(hv); if(chk || cl == NPOS) { sendCode(400, "Invalid Content-Len"); return 2; }
+				cl=strToUint(hv); if(chk) { sendCode(400, "Chunked w/ Len"); return 2; }
 				if(cl > HTTP_POST_MAX) { sendCode(414, "Content Too Long"); return 2; }
 			} else if(hk == "Content-Type" && startsWith(hv,"multipart")) { sendCode(405, "Multipart Unsupported"); return 2; }
 			else if(hk == "Transfer-Encoding" && hv == "chunked") { chk=1; cl=0; } else hd[hk] = hv;
 		}
 	}
 	if(!nl) { sendCode(400, "Premature Header End"); return 2; }
+	if(cl == NPOS) { if(srv) cl=0; else { sendCode(400, "No Content-Len"); return 2; }}
 	cOfs=0, cBuf=Buffer(cl), req=new HttpRequest(*this,t,u,hd,cd,cBuf);
 	if(chk) return parseChunk(r.buf+o,r.len-o);
 	if(cl) { char d=bCopy(r.buf+o,r.len-o); return d; }
