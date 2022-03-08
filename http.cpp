@@ -297,8 +297,7 @@ HttpResponse::HttpResponse(HttpSocket& c):cli(c),kA(0),cm((char*)1) {}
 
 bool HttpResponse::sendCode(uint16_t code, string msg, string desc) {
 	if(stat) return 0; kA=0,uC=0; if(!writeHead(code,msg,0)) return 0; string m = to_string(code)+" "+msg;
-	if(!write("<title>"+m+"</title><body style='background:#111;color:#ccc;font:16pt sans-serif;text-align:center'><pre>"
-	+m+"</pre>"+(desc.size()?"<p>"+desc+"</p>":"")+"</body>")) return 0;
+	if(!write("<title>"+m+"</title><body style='background:#111;color:#ccc;font:16pt sans-serif;text-align:center'><pre>"+m+"</pre>"+(desc.size()?"<p>"+desc+"</p>":"")+"</body>")) return 0;
 	return end();
 }
 
