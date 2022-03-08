@@ -310,8 +310,8 @@ void WebServer::cacheInsert(string f, bool fr) {
 	Buffer b; if(o.readCustom) b=o.readCustom(f,c,&z); if(!b.len && b.len != NPOS) b=readFile(f);
 	if(b.len == NPOS) { if(fr) return stop(-11); else b.len=0; }
 	CacheSize = c.update(*this,b,CacheSize,z);
-	cout << "\033[90m" << (fi.second?"CADD ":"CUPD ") << n << " " <<
-		(c.hash?c.hash:"0") << " " << (c.data?c.fs:0) << "B\033[0m\n";
+	cout << "\e[90m" << (fi.second?"CADD ":"CUPD ") << n << " " <<
+		(c.hash?c.hash:"0") << " " << (c.data?c.fs:0) << "B\e[0m\n";
 }
 
 void WebServer::cacheRemDir(string& p) {
@@ -321,8 +321,7 @@ void WebServer::cacheRemDir(string& p) {
 }
 void WebServer::cacheDelete(string n) {
 	auto fi=FileCache.find(n); if(fi == FileCache.end()) return;
-	cout << "\033[90mCREM "+fi->first+"\033[0m\n";
-	FileCache.erase(fi);
+	cout << "\e[90mCREM "+fi->first+"\e[0m\n"; FileCache.erase(fi);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -366,10 +365,10 @@ size_t CacheEntry::update(WebServer& s, Buffer b, size_t cs, bool z) {
 	#ifdef ZLIB
 	zip=z?ZLIB_MODE:0;
 	if(z) { //Compress:
-		cout << "\033[33m--> ZLIB " << *name;
+		cout << "\e[33m--> ZLIB " << *name;
 		Buffer bo=b; b=zlibCompress(b,zip==1); float cr=b.len/(float)bo.len;
 		if(cr > 0.95) { b.del(); b=bo,zip=0; } else bo.del();
-		cout << (zip?"":"\033[31m") << " RATIO " << cr << "\033[0m\n";
+		cout << (zip?"":"\e[31m") << " RATIO " << cr << "\e[0m\n";
 	}
 	#else
 	zip=0;
@@ -377,7 +376,7 @@ size_t CacheEntry::update(WebServer& s, Buffer b, size_t cs, bool z) {
 	//Update Data:
 	size_t ncs=cs+(fs=b.len); bool c = fs && ncs < s.CacheMax;
 	delete[] hash; if(c) data=b.buf,db=b.db,hash=md5hash(b); else data=0,db=0,hash=0;
-	if(ncs >= s.CacheMax) cout << "\033[31mCache size exceeded!\033[0m\n";
+	if(ncs >= s.CacheMax) cout << "\e[31mCache size exceeded!\e[0m\n";
 	return c?ncs:cs;
 }
 CacheEntry::~CacheEntry() { delete[] hash; delete[] db; }
