@@ -2,6 +2,7 @@
 
 #include "http.h"
 #include <openssl/ssl.h>
+#include <openssl/err.h>
 #include <csignal>
 
 #if __has_include(<sys/utsname.h>)
@@ -13,17 +14,17 @@ namespace http {
 
 string ServerStr = "LightningHTTP/"+string(HTTP_VERSION);
 const SSL_METHOD *SrvSSL, *CliSSL; SSL_CTX *CliCTX;
-SSL_CTX *createSSLClientContext();
+SSL_CTX *createSSLClientContext(bool v);
 
 void httpExit() { EVP_cleanup(); }
 void httpInit() {
 	SSL_load_error_strings(); OpenSSL_add_ssl_algorithms();
 	SrvSSL = TLS_server_method(), CliSSL = TLS_method();
-	CliCTX = createSSLClientContext();
+	CliCTX = createSSLClientContext(HTTP_SSL_VERIFY);
 	#ifdef HTTP_UTSNAME
 	utsname os; if(!ckErr(uname(&os),"httpOSCheck {NON FATAL}")) {
 		ServerStr += ((string)" (")+
-		#ifdef HTTP_SEND_NAME
+		#if HTTP_SEND_NAME
 		os.nodename+", "+
 		#endif
 		os.sysname+" "+(ARCH64?"x64":os.machine)+")";
@@ -54,12 +55,12 @@ ssize_t createSSLContext(const char *certFile, const char *keyFile, SSLList *sl)
 	return (ssize_t)ctx;
 }
 
-SSL_CTX *createSSLClientContext() {
+SSL_CTX *createSSLClientContext(bool v) {
 	SSL_CTX *ctx = SSL_CTX_new(CliSSL); if(!ctx) return 0;
-	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL); SSL_CTX_set_verify_depth(ctx, 4);
-	//SSL_CTX_load_verify_locations(ctx, certFile, NULL);
-	SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 | SSL_OP_NO_COMPRESSION);
-	//BIO *bio = BIO_new_ssl_connect(ctx); BIO_set_conn_hostname(bio, HOST+":https");
+	SSL_CTX_set_verify(ctx, v?SSL_VERIFY_PEER:SSL_VERIFY_NONE, NULL);
+	SSL_CTX_set_verify_depth(ctx, 10);
+	SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
+		SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 | SSL_OP_NO_COMPRESSION);
 	return ctx;
 }
 
@@ -147,7 +148,8 @@ bool HttpSocket::initCli(bool https, HttpResFunc& cb) {
 		X509_VERIFY_PARAM *p = SSL_get0_param(s);
 		X509_VERIFY_PARAM_set1_host(p,cli.addr.host.data(),0);
 		if(SSL_connect(s) <= 0) {
-			error("SSL "+name,-1); cb(-5,0,0);
+			const char *es=ERR_error_string(ERR_get_error(),0);
+			error("SSL "+name+": "+es,-1); cb(-5,0,0);
 			cclose(); delete this; return 0;
 		}
 	}
@@ -205,7 +207,9 @@ char HttpSocket::parse(Buffer r) {
 				if(hs != 3 || !h[2].match("HTTP/1.1")) { sendCode(400, "Invalid Request Head"); return 2; }
 				if(h[1].len > 8000) { sendCode(414, "URI Too Long"); return 2; }
 				t=h[0].toStr(); u=h[1].toStr(); if(u[0] != '/') { sendCode(400, "Invalid Request URI"); return 2; }
-				if(t != "GET" && t != "POST") { sendCode(405, "Unsupported Reqest Type"); return 2; }
+				if(t != "GET" && t != "POST" && t != "PUT" && t != "DELETE") {
+					sendCode(405, "Unsupported Request Type"); return 2;
+				}
 			} else { //Client Mode:
 				if(hs < 2 || !h[0].matchPart("HTTP/1.") || h[1].len != 3) { sendCode(400, "Invalid Response Head"); return 2; }
 				if(hs > 2) t=b.toStr(h[0].len+h[1].len+2); u=h[1].toStr(); cd=strToUint(u); u="";
@@ -332,7 +336,7 @@ Buffer HttpResponse::genHeader() {
 		if(hf == hd.end()) hd["Host"] = cli.cli.addr.host;
 	} else {
 		if(stat != 304) hd["Server"] = ServerStr;
-		#ifdef HTTP_NO_CORS
+		#if HTTP_NO_CORS
 		hd["X-Frame-Options"] = "sameorigin";
 		#endif
 		cl = !(stat < 200 || stat == 204 || stat >= 300 && stat < 400);
@@ -350,8 +354,9 @@ Buffer HttpResponse::genHeader() {
 		for(Buffer& c: ck) h += "Set-Cookie: "+c.toStr()+HTTP_NEWLINE;
 	}
 	for(auto& kv: hd) h += kv.first+": "+kv.second+HTTP_NEWLINE; cl=(cm==(void*)1);
-	Buffer hb=cm?Append::buf(cl?"GET /":cm," HTTP/1.1",(sMsg.size()?" "+sMsg:""),HTTP_NEWLINE,h,HTTP_NEWLINE,cont):
-	Append::buf("HTTP/1.1 ",stat,(sMsg.size()?" "+sMsg:""),HTTP_NEWLINE,h,HTTP_NEWLINE,cont);
+	string msg; if(sMsg.size()) { msg=" "+sMsg; replaceAll(msg,"\n"," "); }
+	Buffer hb=cm?Append::buf(cl?"GET /":cm," HTTP/1.1",msg,HTTP_NEWLINE,h,HTTP_NEWLINE,cont):
+		Append::buf("HTTP/1.1 ",stat,msg,HTTP_NEWLINE,h,HTTP_NEWLINE,cont);
 	if(cm && !cl) delete[] cm; if(!hdr) delete &hd;
 	return hb;
 }

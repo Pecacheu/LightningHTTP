@@ -3,7 +3,9 @@
 
 #include "http.h"
 
-#define ZLIB_MODE 1 //0 = Disable Zip, 1 = Gzip Header, 2 = Zlib Header
+#ifndef ZLIB_MODE
+	#define ZLIB_MODE 1 //0 = Disable Zip, 1 = Gzip Header, 2 = Zlib Header
+#endif
 
 namespace server {
 using namespace http;

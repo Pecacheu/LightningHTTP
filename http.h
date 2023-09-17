@@ -1,21 +1,41 @@
-//LightningHTTP v3.6.4 ©2021 Pecacheu; GNU GPL 3.0
+//LightningHTTP v3.6.5 ©2021 Pecacheu; GNU GPL 3.0
 #pragma once
 
 #include <utils.h>
 #include <net.h>
 
-#define HTTP_DEBUG 0
-#define HTTP_VERSION "3.6.4"
-#define HTTP_BACKLOG 50 //Pending Connection Buffer
-#define HTTP_THREADS 1000 //Max Cients
-#define HTTP_TIMEOUT 15
-#define HTTP_READ_SIZE 4096
+#define HTTP_VERSION "3.6.5"
 #define HTTP_NEWLINE "\r\n"
-#define HTTP_POST_MAX 1048576 //1MB
 
-//Global Header Behavior:
-#define HTTP_SEND_NAME //Include PC name in 'Server' header
-#define HTTP_NO_CORS //Prevent iframe loading & CORS attacks
+#ifndef HTTP_DEBUG
+	#define HTTP_DEBUG 0 //Debug Mode
+#endif
+#ifndef HTTP_BACKLOG
+	#define HTTP_BACKLOG 50 //Pending Connection Buffer
+#endif
+#ifndef HTTP_THREADS
+	#define HTTP_THREADS 1000 //Max Clients
+#endif
+#ifndef HTTP_TIMEOUT
+	#define HTTP_TIMEOUT 15 //Timeout Sec
+#endif
+#ifndef HTTP_READ_SIZE
+	#define HTTP_READ_SIZE 4096 //Read Buffer
+#endif
+#ifndef HTTP_POST_MAX
+	#define HTTP_POST_MAX 1048576 //1MB
+#endif
+#ifndef HTTP_SSL_VERIFY
+	#define HTTP_SSL_VERIFY 1 //Verify SSL Certs
+#endif
+
+//Global Header Behavior
+#ifndef HTTP_SEND_NAME
+	#define HTTP_SEND_NAME 1 //Include PC name in 'Server' header
+#endif
+#ifndef HTTP_NO_CORS
+	#define HTTP_NO_CORS 1 //Prevent iframe loading & CORS attacks
+#endif
 
 namespace http {
 using namespace net;
