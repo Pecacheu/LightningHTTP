@@ -4,7 +4,7 @@
 #include <utils.h>
 #include <net.h>
 
-#define HTTP_VERSION "3.6.5"
+#define HTTP_VERSION "3.6.6"
 #define HTTP_NEWLINE "\r\n"
 
 #ifndef HTTP_DEBUG
@@ -23,7 +23,10 @@
 	#define HTTP_READ_SIZE 4096 //Read Buffer
 #endif
 #ifndef HTTP_POST_MAX
-	#define HTTP_POST_MAX 1048576 //1MB
+	#define HTTP_POST_MAX 1074000000 //1GB - Max upload in server mode
+#endif
+#ifndef HTTP_GET_MAX
+	#define HTTP_GET_MAX 1074000000 //1GB - Max download in client mode
 #endif
 #ifndef HTTP_SSL_VERIFY
 	#define HTTP_SSL_VERIFY 1 //Verify SSL Certs

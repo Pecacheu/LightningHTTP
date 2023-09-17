@@ -221,16 +221,20 @@ char HttpSocket::parse(Buffer r) {
 			size_t hs=bFind(b,":"); if(hs > 50 || hs < 3) { sendCode(400, "Invalid Header"); return 2; }
 			if(b.len-hs < 3) continue; hk=toCamelCase(b.toStr(0,hs)), hv=b.toStr(hs+2);
 			if(hk == "Content-Length") {
+				if(t == "GET") { sendCode(400, "GET w/ Content"); return 2; }
 				cl=strToUint(hv); if(chk) { sendCode(400, "Chunked w/ Len"); return 2; }
-				if(cl > HTTP_POST_MAX) { sendCode(414, "Content Too Long"); return 2; }
+				if(cl > (srv?HTTP_POST_MAX:HTTP_GET_MAX)) { sendCode(414, "Content Too Long"); return 2; }
 			} else if(hk == "Content-Type" && startsWith(hv,"multipart")) { sendCode(405, "Multipart Unsupported"); return 2; }
 			else if(hk == "Transfer-Encoding" && hv == "chunked") { chk=1; cl=0; } else hd[hk] = hv;
 		}
 	}
 	if(!nl) { sendCode(400, "Premature Header End"); return 2; }
-	if(cl == NPOS) { if(srv) cl=0; else { sendCode(400, "No Content-Len"); return 2; }}
+	if(cl == NPOS) {if(srv) cl=0; else { sendCode(400, "No Content-Len"); return 2; }}
 	cOfs=0, cBuf=Buffer(cl), req=new HttpRequest(*this,t,u,hd,cd,cBuf);
-	if(chk) return parseChunk(r.buf+o,r.len-o);
+	if(chk) {
+		if(t == "GET") { sendCode(400, "Chunked GET"); return 2; }
+		return parseChunk(r.buf+o,r.len-o);
+	}
 	if(cl) { char d=bCopy(r.buf+o,r.len-o); return d; }
 	cBuf.del(); return 1;
 }
@@ -250,7 +254,7 @@ char HttpSocket::parseChunk(const char *buf, size_t len) {
 	ck[i]=0; string s=ck; cd=hexStrToUint(s); Buffer b=Buffer(buf,len); i=bFind(b,"\n",i);
 	if(cd == NPOS || i == NPOS) { cBuf.del(); sendCode(400, "Invalid Chunk-Len"); return 2; }
 	if(!cd) return 1; buf+=i+1; len-=i+1; cOfs=cBuf.len;
-	if(cOfs+cd > HTTP_POST_MAX) { cBuf.del(); sendCode(414, "Content Too Long"); return 2; }
+	if(cOfs+cd > (srv?HTTP_POST_MAX:HTTP_GET_MAX)) { cBuf.del(); sendCode(414, "Content Too Long"); return 2; }
 	b=cBuf; cBuf=Buffer(cOfs+cd); memcpy((void*)cBuf.buf,b.buf,cOfs); b.del();
 	return bCopy(buf,len,&rl)&&len-rl>2 ? parseChunk(buf+rl+2,len-rl-2):0;
 }
