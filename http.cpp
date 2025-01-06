@@ -1,9 +1,12 @@
-//LightningHTTP ©2021 Pecacheu; GNU GPL 3.0
+//LightningHTTP ©2025 Pecacheu; GNU GPL 3.0
 
 #include "http.h"
 #include <openssl/ssl.h>
+#include <openssl/rand.h>
 #include <openssl/err.h>
 #include <csignal>
+
+#define WS_UUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 #if __has_include(<sys/utsname.h>)
 	#define HTTP_UTSNAME
@@ -84,7 +87,7 @@ void acceptClient(HttpServer& s) {
 	Socket c = netAccept(s.s); if(ckErr(c.err,"netAccept")) return;
 	if(ckErr(c.setTimeout(HTTP_TIMEOUT),"setTimeout")) { c.close(); return; }
 	HttpSocket *cli = new HttpSocket(s,c); s.tx++;
-	thread([cli]() { cli->init(); }).detach();
+	thread([cli]() { WebSocket *ws; if(ws=cli->init()) ws->init(); }).detach();
 }
 
 HttpServer::HttpServer(int s, string& n, HttpOptions& o, SSLList *l):s(s),name(n),opt(o),sl(l) {
@@ -100,13 +103,13 @@ HttpResponse *httpOpenRequest(NetAddr a, HttpResFunc cb, bool https) {
 
 //------------ HttpSocket ------------
 
-HttpSocket::HttpSocket(HttpServer& s, Socket c):srv(&s),cli(c),
+HttpSocket::HttpSocket(HttpServer& s, Socket& c):srv(&s),cli(c),
 name(s.name+"->"+c.addr.host+":"+to_string(c.addr.port)+" ("+to_string(c.sck)+")") {}
 
-HttpSocket::HttpSocket(Socket c):srv(0),cli(c),
+HttpSocket::HttpSocket(Socket& c):srv(0),cli(c),
 name(string(c.addr.host)+":"+to_string(c.addr.port)+" ("+to_string(c.sck)+")") {}
 
-void HttpSocket::init() {
+WebSocket *HttpSocket::init() {
 	#if HTTP_DEBUG
 	cout << name+" Thread 0x" << hex << this_thread::get_id() << dec << '\n';
 	#endif
@@ -117,7 +120,7 @@ void HttpSocket::init() {
 			#if HTTP_DEBUG
 			cout << name+" SSL Error " << SSL_get_error(s,e) << '\n';
 			#endif
-			cclose(); delete this; return;
+			cclose(); delete this; return 0;
 		}
 	}
 	char b[HTTP_READ_SIZE]; char r,q=0; bool ka;
@@ -127,18 +130,37 @@ void HttpSocket::init() {
 			delete eRes; if(q==2) { delete req; break; }
 			if(q==1) r=0; q=1;
 		}
-		if(!req) break; //Break on header parse error.
-		if(r==1 && !eRes) { //Create response:
-			if(srv->opt.onRequest) {
+		if(!req) break; //Break on header parse error
+		if(r==1 && !eRes) { //Create response
+			auto ru=req->header.find("Upgrade");
+			if(ru != req->header.end() && ru->second == "websocket") { //WebSocket Transfer
+				if(srv->opt.wsPaths.find(req->path) == srv->opt.wsPaths.end()) {
+					sendCode(401, "No Endpoint"); delete req; break;
+				}
+				uint8_t ver=strToUint(req->header["Sec-Websocket-Version"]);
+				if(ver != 13 || req->header["Connection"] != "Upgrade") {
+					sendCode(ver==13?400:405, "Bad Upgrade"); delete req; break;
+				}
+				HttpResponse res(*this,0); stringmap hd;
+				hd["Upgrade"] = "websocket"; hd["Connection"] = "Upgrade";
+				string hs = req->header["Sec-Websocket-Key"]+WS_UUID;
+				uint8_t sha[SHA_DIGEST_LENGTH];
+				SHA1((uint8_t*)hs.c_str(), hs.size(), (uint8_t*)&sha);
+				hd["Sec-Websocket-Accept"] = Buffer((char*)sha,SHA_DIGEST_LENGTH).toBase64()+"=";
+				res.writeHead(101, "WS", &hd); res.end();
+				WebSocket *ws=new WebSocket(*this, req->path,ssl);
+				delete req; cBuf.del(); delete this; return ws;
+			} else if(srv->opt.onRequest) {
 				q=0,ka=0; auto kh = req->header.find("Connection");
-				if(kh != req->header.end()) ka = kh->second == "keep-alive";
+				if(kh != req->header.end()) ka = kh->second=="keep-alive";
 				HttpResponse *res=new HttpResponse(*this,ka);
 				srv->opt.onRequest(*req,*res); res->end();
-				ka=res->kA; delete req; delete res; cBuf.del(); if(!ka) break;
+				ka=res->kA; delete res;
 			} else sendCode(204, "No Application");
+			delete req; cBuf.del(); if(!ka) break;
 		}
 	}
-	cclose(); cBuf.del(); delete this;
+	cclose(); cBuf.del(); delete this; return 0;
 }
 
 bool HttpSocket::initCli(bool https, HttpResFunc& cb) {
@@ -168,16 +190,7 @@ bool HttpSocket::initCli(bool https, HttpResFunc& cb) {
 
 char HttpSocket::run(char *b) {
 	ssize_t len=read(b, HTTP_READ_SIZE);
-	if(len <= 0) {
-		#if HTTP_DEBUG
-		if(!len || errno == EBADF) cout << name+" Connection Closed\n";
-		else if(errno == EAGAIN) cout << name+" Timed Out\n";
-		else if(errno == ECONNRESET) cout << name+" Connection Reset\n";
-		#else
-		if(!len || errno == EAGAIN || errno == ECONNRESET || errno == EBADF) {}
-		#endif
-		else error(name,len); return 3;
-	}
+	if(len <= 0) return 3;
 	#if HTTP_DEBUG > 2
 	string s=string(b,len); replaceAll(s,"\r","<\\r>"); replaceAll(s,"\n","<\\n>\n");
 	cout << "\n<<IN "+to_string(len)+"b "+name+">>\n"+s+"<<IN END>>\n";
@@ -259,13 +272,25 @@ char HttpSocket::parseChunk(const char *buf, size_t len) {
 	return bCopy(buf,len,&rl)&&len-rl>2 ? parseChunk(buf+rl+2,len-rl-2):0;
 }
 
-inline void HttpSocket::cclose() {
+void HttpSocket::cclose() {
 	if(cli.err) return; cli.err=1; if(srv) srv->tx--; cli.close(); if(ssl) SSL_free((SSL*)ssl);
 }
-inline ssize_t HttpSocket::read(char *buf, size_t len) {
-	if(cli.err) return 0; return ssl?SSL_read((SSL*)ssl,buf,len):cli.read(buf,len);
+ssize_t HttpSocket::read(char *buf, size_t len) {
+	if(cli.err) return 0;
+	ssize_t r=ssl?SSL_read((SSL*)ssl,buf,len):cli.read(buf,len);
+	if(r<=0) {
+		#if HTTP_DEBUG
+		if(!r || errno == EBADF) cout << name+" Connection Closed\n";
+		else if(errno == EAGAIN) cout << name+" Timed Out\n";
+		else if(errno == ECONNRESET) cout << name+" Connection Reset\n";
+		#else
+		if(!r || errno == EAGAIN || errno == ECONNRESET || errno == EBADF) {}
+		#endif
+		else error(name,r);
+	}
+	return r;
 }
-inline ssize_t HttpSocket::write(Buffer b) {
+ssize_t HttpSocket::write(Buffer b) {
 	if(cli.err) { b.del(); return 0; }
 	#if HTTP_DEBUG > 2
 	string s=b.toStr(); replaceAll(s,"\r","<\\r>"); replaceAll(s,"\n","<\\n>\n");
@@ -290,6 +315,120 @@ void HttpSocket::sendCode(uint16_t code, string msg) {
 	if(srv) eRes->sendCode(code,msg,e); else eRes->writeHead(code,msg);
 }
 
+//------------ WebSocket ------------
+
+WebSocket::WebSocket(HttpSocket& c, string& p, void *ssl):srv(c.srv),
+cli(c.cli),path(p),ssl(ssl),useMask(0),cb(c.srv->opt.wsPaths.find(p)->second),
+name(srv->name+"->ws:"+cli.addr.host+":"+to_string(cli.addr.port)+p+" ("+to_string(cli.sck)+")") {}
+
+void WebSocket::init() {
+	#if HTTP_DEBUG
+	cout << name+" Thread 0x" << hex << this_thread::get_id() << dec << '\n';
+	#endif
+	if(cli.setTimeout(HTTP_WS_TIMEOUT)) { delete this; return cclose(); }
+	if(srv->opt.onWSConnect) srv->opt.onWSConnect(*this);
+	run(); cclose(); msg.del();
+	if(srv->opt.onWSDisconnect) srv->opt.onWSDisconnect(*this);
+	delete this;
+}
+
+void WebSocket::end() {
+	send(Buffer(),8); cli.err=1;
+	//TODO: Send a close frame, wait 10 sec for response before force-closing
+	//But don't wait here, because this could block forever if it's called in the run thread
+	//ev.setTimeout([this](void *p) { cclose(); }, 10000);
+	//ev.clearTimeout();
+	cli.close();
+}
+
+void WebSocket::run() {
+	char b[HTTP_READ_SIZE]; bool nc; ssize_t len,r;
+	while(!srv->st) {
+		if((len=read(b, HTTP_READ_SIZE))<=0) return;
+		if((r=parseHdr(Buffer(b,len)))<=0) return error(name,r);
+		len-=r; if(len > msg.len-mOfs) return error(name,-10); //Len Mismatch
+		if(!msg.buf) { //Create Buffer
+			if(!mOfs && len==msg.len) msg.buf=b+r,msg.db=0,r=0; else msg=Buffer(msg.len);
+		}
+		if(r) memcpy((void*)(msg.buf+mOfs),b+r,len); mOfs+=len;
+		while(mOfs < msg.len) { //Gimme moar!
+			if((len=read((char*)(msg.buf+mOfs), msg.len-mOfs))<=0) return;
+			mOfs+=len;
+		}
+		if(fin) {
+			if(mask) for(size_t i=0; i<msg.len; ++i)
+				((uint8_t*)msg.buf)[i] = msg.buf[i]^((uint8_t*)&mask)[i%4];
+			cb(*this); msg.del();
+			if(op==8) { send(Buffer(),8); return; } //Close Frame
+			op=0,mOfs=0;
+		}
+	}
+}
+
+ssize_t WebSocket::parseHdr(Buffer b) {
+	if(b.len<3) return -2;
+	fin=b.buf[0]>>7; uint8_t ofs=2; mask=b.buf[1]>>7;
+	size_t len=b.buf[1]&127; if(!op) op=b.buf[0]&15;
+	if(len==126) { //2-Byte Extended
+		if(b.len<5) return -2;
+		ofs=4, len=(size_t)b.buf[2]<<8, len|=b.buf[3];
+	} else if(len==127) { //8-Byte Extended
+		if(b.len<11) return -2;
+		ofs=10, len=(size_t)b.buf[2]<<56, len|=(size_t)b.buf[3]<<48, len|=(size_t)b.buf[4]<<40,
+			len|=(size_t)b.buf[5]<<32, len|=(size_t)b.buf[6]<<24, len|=(size_t)b.buf[7]<<16,
+			len|=(size_t)b.buf[8]<<8, len|=b.buf[9];
+	}
+	if(mOfs+len > HTTP_WS_MAX) return -3; //Msg Too Long
+	if(mask) {
+		mask=*(uint32_t*)(b.buf+ofs), ofs+=4;
+		if(!mask) return -4; //Bad Mask
+	}
+	if(!msg.buf) msg.len=len; else {
+		Buffer ob=msg; msg=Buffer(ob.len+len);
+		memcpy((void*)msg.buf, ob.buf, ob.len);
+		mOfs=ob.len; ob.del();
+	}
+	return ofs;
+}
+
+ssize_t WebSocket::read(char *buf, size_t len) {
+	if(cli.err==2) return 0;
+	ssize_t r=ssl?SSL_read((SSL*)ssl,buf,len):cli.read(buf,len);
+	if(r<=0) {
+		#if HTTP_DEBUG
+		if(!r || errno == EBADF) cout << name+" Connection Closed\n";
+		else if(errno == EAGAIN) cout << name+" Timed Out\n";
+		else if(errno == ECONNRESET) cout << name+" Connection Reset\n";
+		#else
+		if(!r || errno == EAGAIN || errno == ECONNRESET || errno == EBADF) {}
+		#endif
+		else error(name,-11);
+	}
+	return r;
+}
+ssize_t WebSocket::send(Buffer b, uint8_t op) {
+	if(cli.err) return -2;
+	uint8_t ofs=2;
+	if(b.len>125) ofs=4; //2-Byte Extended
+	else if(b.len>UINT16_MAX) ofs=10; //8-Byte Extended
+	size_t l=b.len+ofs; char sb[l];
+	if(b.len>125) sb[1]=126, sb[2]=b.len>>8, sb[3]=b.len;
+	else if(b.len>UINT16_MAX) sb[1]=127, sb[2]=b.len>>56, sb[3]=b.len>>48, sb[4]=b.len>>40,
+		sb[5]=b.len>>32, sb[6]=b.len>>24, sb[7]=b.len>>16, sb[8]=b.len>>8, sb[9]=b.len;
+	else sb[1]=b.len;
+	sb[0]=128|(op&15);
+	if(useMask) { //Mask Bytes
+		sb[1]|=128; if(RAND_bytes((uint8_t*)&mask,4)<1) return error(name,-14),-14;
+		for(size_t i=0; i<b.len; ++i) (sb+ofs)[i] = b.buf[i] ^ ((uint8_t*)&mask)[i%4];
+	} else memcpy(sb+ofs, b.buf, b.len);
+	ssize_t n=ssl?SSL_write((SSL*)ssl,sb,l):cli.write(sb,l);
+	if(n!=l) error(name,-15); return n;
+}
+void WebSocket::cclose() {
+	if(cli.err==2) return; cli.err=2;
+	if(srv) srv->tx--; cli.close(); if(ssl) SSL_free((SSL*)ssl);
+}
+
 //------------ HttpRequest ------------
 
 HttpRequest::HttpRequest(HttpSocket& c, string& t, string& u, utils::stringmap& hd, uint16_t cd, utils::Buffer& n):
@@ -312,7 +451,7 @@ bool HttpResponse::sendCode(uint16_t code, string msg, string desc) {
 bool HttpResponse::writeHead(uint16_t code, string status, stringmap *headers) { //Server Mode
 	if(cm || ended || code < 100 || code > 999 || (uC && stat)) return 0;
 	if(uC && (code < 200 || code == 204 || code >= 300 && code < 400)) return 0;
-	stat=code, sMsg=status, hdr=headers;
+	stat=code, sMsg=status, hdr=headers?(uC?headers:new stringmap(*headers)):0;
 	if(uC && cli.write(genHeader()) <= 0) return 0;
 	return 1;
 }
@@ -320,7 +459,8 @@ bool HttpResponse::writeHead(uint16_t code, string status, stringmap *headers) {
 bool HttpResponse::writeHead(const char *path, const char *method, stringmap *headers) { //Client Mode
 	if(!cm || ended || (uC && stat)) return 0;
 	stat=1; if(!path) path="/"; if(!method) method="GET";
-	cm=Append::str(method,path[0]=='/'?" ":" /",path), hdr=headers;
+	cm=Append::str(method,path[0]=='/'?" ":" /",path);
+	hdr=headers?(uC?headers:new stringmap(*headers)):0;
 	if(uC && cli.write(genHeader()) <= 0) return 0;
 	return 1;
 }
@@ -334,7 +474,7 @@ bool HttpResponse::write(Buffer b) {
 }
 
 Buffer HttpResponse::genHeader() {
-	stringmap& hd = *(hdr?hdr:new stringmap()); bool cl;
+	stringmap& hd=*(hdr?hdr:new stringmap()); bool cl;
 	if(cm) {
 		cl=cont.len; auto hf=hd.find("Host");
 		if(hf == hd.end()) hd["Host"] = cli.cli.addr.host;
@@ -361,7 +501,7 @@ Buffer HttpResponse::genHeader() {
 	string msg; if(sMsg.size()) { msg=" "+sMsg; replaceAll(msg,"\n"," "); }
 	Buffer hb=cm?Append::buf(cl?"GET /":cm," HTTP/1.1",msg,HTTP_NEWLINE,h,HTTP_NEWLINE,cont):
 		Append::buf("HTTP/1.1 ",stat,msg,HTTP_NEWLINE,h,HTTP_NEWLINE,cont);
-	if(cm && !cl) delete[] cm; if(!hdr) delete &hd;
+	if(cm && !cl) delete[] cm; if(uC||!hdr) delete &hd;
 	return hb;
 }
 

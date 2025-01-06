@@ -3,7 +3,7 @@ High performance minimal C++ HTTP Server w/ HTTPS Support. A ready-to-go impleme
 
 ### Dependencies:
 - C++17 & std library (including std::thread)
-- C-Utils v2.2 or later
+- [C-Utils](https://github.com/pecacheu/c-utils) v2.2 or later
 - OpenSSL v1.1 or later
 - *Optional:* Linux sys/utsname.h
 
@@ -27,25 +27,26 @@ High performance minimal C++ HTTP Server w/ HTTPS Support. A ready-to-go impleme
 
 ### Macros
 - `HTTP_DEBUG` 0 = Disabled, 1 = Debug, 2 = Verbose Debug, 3 = Verbose Debug & Print all data
-- `HTTP_VERSION` Library version.
-- `HTTP_BACKLOG` Set pending connection buffer.
-- `HTTP_THREADS` Set max clients.
-- `HTTP_TIMEOUT` Set thread timeout in seconds.
-- `HTTP_READ_SIZE` Set read buffer size.
-- `HTTP_NEWLINE` Do not change.
-- `HTTP_POST_MAX` Maximum POST data length.
+- `HTTP_VERSION` Library version
+- `HTTP_BACKLOG` Set pending connection buffer
+- `HTTP_THREADS` Set max clients
+- `HTTP_TIMEOUT` Set thread timeout in seconds
+- `HTTP_READ_SIZE` Set read buffer size
+- `HTTP_NEWLINE` Do not change
+- `HTTP_POST_MAX` Maximum POST data length
 
 ### Global Header Behavior
-- `HTTP_SEND_NAME` Include PC name in 'Server' header.
-- `HTTP_NO_CORS` Prevent iframe loading & CORS attacks.
+- `HTTP_SEND_NAME` Include PC name in 'Server' header
+- `HTTP_NO_CORS` Prevent iframe loading & CORS attacks
 
 ### Typedefs
 - HttpResFunc `void func(int err, HttpRequest *res, string *eMsg)` HTTP Response callback.
+- WSFunc `void func(WebSocket& ws)` WebSocket callback.
 
 ### Functions
 - `string httpGetVersion()` Get version string.
 - `HttpServer *httpStartServer(uint16_t port, string name, HttpOptions& opt, SSLList *sl=0)` Start server `name` listening at `port`. If `sl` is provided, the server uses HTTPS.
-- `HttpResponse *httpOpenRequest(NetAddr a, HttpResFunc cb, bool https=0)` Open a request to address `a` with callback `cb`. Optionally, you can set request headers and write data via the returned HttpResponse object. Then call `end()` to send the request. *(Note: NetAddr is part of [C-Utils](https://github.com/pecacheu/c-utils).)*
+- `HttpResponse *httpOpenRequest(NetAddr a, HttpResFunc cb, bool https=false)` Open a request to address `a` with callback `cb`. Optionally, you can set request headers and write data via the returned HttpResponse object. Then call `end()` to send the request. *(Note: NetAddr is part of [C-Utils](https://github.com/pecacheu/c-utils).)*
 
 ### [struct] HttpOptions
 Set server options.
@@ -56,6 +57,9 @@ Set server options.
 	- `err` If the server sent back an error, the code and message can be found here. NULL otherwise.
 	- The return value controls how the request is handled. *0 = Default, 1 = Skip, 2 = Drop Connection*
 	- *Note: Connection will be dropped regardless if there was a data parsing error.*
+- `void onWSConnect(WebSocket& ws)` Fired when new WebSocket client connects.
+- `void onWSDisconnect(WebSocket& ws)` Fired when a WebSocket disconnects.
+- `map<string, WSFunc> wsPaths` Listeners in the map are fired when a matching path string (including starting `/`), receives a WebSocket message.
 
 ### [struct] SSLList
 - `SSLList(size_t l)` Init SSLList with size `l`. Size is fixed, `add()` will fail if it's called more than `l` times.
@@ -102,9 +106,22 @@ Allows you to respond to the client (or send a request from httpOpenRequest). Do
 
 ### [class] HttpSocket
 Represents a client socket. Do not call any functions.
-- `HttpServer *srv` The server this socket belongs to.
-- `Socket cli` Underlying net::Socket instance.
+- `const HttpServer *srv` The server this socket belongs to.
+- `const Socket cli` Underlying client [net::Socket](https://github.com/pecacheu/c-utils?tab=readme-ov-file#struct-socket).
 - `const string& name` Human-readable name for logging purposes.
+
+### [class] WebSocket
+Represents a WebSocket connection.
+- `const HttpServer *srv` The server this socket belongs to.
+- `const Socket cli` Underlying client [net::Socket](https://github.com/pecacheu/c-utils?tab=readme-ov-file#struct-socket).
+- `const bool useMask` Whether the socket uses masking.
+- `const string name` Human-readable name for logging purposes.
+- `const string path` URI path of the message.
+- `const uint8_t op` Message [opcode](https://en.wikipedia.org/wiki/WebSocket#Opcodes).
+- `const Buffer msg` Message contents.
+- `ssize_t send(Buffer b, uint8_t op=1)` Send a message, with optional opcode. Returns bytes sent, or error if <= 0.
+- `void setTimeout(time_t sec)` Set socket timeout in seconds.
+- `void end()` Gracefully close socket (other side is informed before closing).
 
 ## Namespace: server
 An easy to use built-in web server engine included with LightningHTTP. Includes file parsing, URL parsing, SmartCache (RAM Cache system) with smart compression (only activates when file has a good compression ratio), and rate limiting!
@@ -115,10 +132,9 @@ An easy to use built-in web server engine included with LightningHTTP. Includes 
 
 ### [struct] ServerOpt
 Used to set WebServer callbacks.
-- `bool chkMode=1` Sets if chunked transfer mode is on by default.
-- `HttpReqFunc onReq` Override for *onRequest* from HttpOptions. If `end()` is not called before this function ends, the server attempts to serve the request from the filesystem.
+- `bool chkMode=true` Sets if chunked transfer mode is on by default.
+- `HttpOptions http` HTTP options and callbacks. If `end()` is not called in *http.onRequest* before the function ends, WebServer attempts to serve the request from the filesystem. This enables overriding only certain requests or under specific conditions (ex. authentication).
 - `HttpReqFunc postReq` Called after a request is complete. Useful for logging purposes.
-- `HttpPreFunc preReq` Sets *preRequest* callback from HttpOptions.
 - `void setHdr(HttpRequest& req, HttpResponse& res, stringmap& hd)` Called before the request is sent, allowing you to set custom headers. Does not fire if `onReq()` handled the request.
 - `Buffer readCustom(string f, CacheEntry& c, bool *zip)` Custom read callback, called every time a file changes. Return an empty buffer to perform a standard file read, or return a buffer of size `NPOS` to indicate an error.
 
@@ -131,6 +147,9 @@ Represents a web server and it's HTTP/HTTPS instance.
 
 ### [struct] CacheEntry
 **Do not use.** Stores data used by the internal SmartCache system, which caches files to memory and automatically updates whenever a file is changed.
+
+## Custom Templates
+Out-of-the-box, WebServer supports a simple template insertion mechanism. Template filenames should start with a `+` symbol, for example `+MyHeader.html`. To include this template in other files (currently only `.html` is supported), use a specially-formatted HTML comment, eg. `<!-- +MyHeader+ -->` or `<!-- +MyHeader.html+ -->`.
 
 ## Simple Server Example
 

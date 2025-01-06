@@ -1,4 +1,4 @@
-//LightningHTTP ©2021 Pecacheu; GNU GPL 3.0
+//LightningHTTP ©2025 Pecacheu; GNU GPL 3.0
 
 #include "server.h"
 #include <unordered_set>
@@ -143,9 +143,9 @@ int WebServer::init(string n, uint16_t port, uint16_t sPort, SSLList *sl) {
 	if((!port && !sPort) || (sPort && !sl)) return -1;
 	if(!fs::is_directory(Root)) { error("Dir "+Root+ " Not Found"); return -2; }
 	//Start servers:
-	HttpOptions opt; opt.onRequest=bind(&WebServer::onReq,this,_1,_2); opt.preRequest=o.preReq;
-	if(port) { sr=httpStartServer(port,n,opt); if(!sr) { error("Start "+n,-3); return -3; }}
-	if(sPort) { ss=httpStartServer(sPort,n+":s",opt,sl); if(!ss) { error("Start "+n+":s",-4); return -4; }}
+	userReq=o.http.onRequest; o.http.onRequest=bind(&WebServer::onReq,this,_1,_2);
+	if(port) {sr=httpStartServer(port,n,o.http); if(!sr) { error("Start "+n,-3); return -3; }}
+	if(sPort) {ss=httpStartServer(sPort,n+":s",o.http,sl); if(!ss) { error("Start "+n+":s",-4); return -4; }}
 	//Start FileWatcher:
 	cacheAddDir("",1); cout << "File Cache: " << (CacheSize/1000.f) << "KB\n";
 	FileWatcher fw; if(ckErr(fw.init(bind(&WebServer::onFileChg,this,_1)),"fwInit")) return -5;
@@ -161,7 +161,7 @@ int WebServer::init(string n, uint16_t port, uint16_t sPort, SSLList *sl) {
 void WebServer::onReq(HttpRequest& req, HttpResponse& res) {
 	//Handle special:
 	res.setUseChunked(o.chkMode);
-	if(o.onReq) { o.onReq(req,res); if(res.isEnded()) { endRq; }}
+	if(userReq) {userReq(req,res); if(res.isEnded()) { endRq; }}
 	if(req.path.size() > 1 && req.path[1] == '+') {
 		res.sendCode(404,"Not Found"); endRq;
 	}
@@ -210,6 +210,7 @@ stringmap ContentTypes({
 	{"svg",		"image/svg+xml"},
 	{"js",		"text/javascript"},
 	{"pdf",		"application/pdf"},
+	{"wasm",	"application/wasm"},
 	{"mp3",		"audio/mpeg"},
 	{"mp4",		"video/mp4"},
 	{"ogg",		"video/ogg"},
@@ -294,7 +295,7 @@ void WebServer::fileRecalc(void *p) {
 void WebServer::cacheAddDir(string path, bool fr) {
 	CWLock();
 	if(fr) for(auto& p: fs::recursive_directory_iterator(Root+path)) if(fs::is_regular_file(p.status())) {
-		string f=p.path().generic_string(); if(f[RootLen+1] == '+') cacheInsert(f,1); //Headers first
+		string f=p.path().generic_string(); if(f[RootLen+1] == '+') cacheInsert(f,1); //Templates first
 	}
 	for(auto& p: fs::recursive_directory_iterator(Root+path))
 		if(fs::is_regular_file(p.status())) { cacheInsert(p.path().generic_string(),fr); if(SEr) return; }
@@ -351,15 +352,23 @@ Buffer zlibCompress(Buffer d, bool gzip) {
 }
 #endif
 
-size_t CacheEntry::update(WebServer& s, Buffer b, size_t cs, bool z) {
+const regex htmlTpl("^\\s*\\+([^\\n+]+)\\+\\s*$");
+
+size_t CacheEntry::update(WebServer& srv, Buffer b, size_t cs, bool z) {
 	if(data) { delete[] db; cs-=fs; } if(b.len<100) z=0;
-	if(endsWith(*name,".html")) { //Check for header:
-		if((*name)[1] == '+') z=0; else if(b.len > 20 && b[0] == '+') {
-			size_t n=1; while(*(b.buf+n) != '+') if(++n == 20) break; string hn=string(b.buf,n);
-			CacheEntry *h=s.getFile("/"+hn+".html"); if(h) {
-				n++; size_t bl=b.len-n, nl=h->fs+bl; char *nb=new char[nl];
-				memcpy(nb,h->data,h->fs); memcpy(nb+h->fs,b.buf+n,bl); b.del(); b=Buffer(nb,nl);
-			} else { z=0,b=Append::buf("File Error '",hn,"'"); }
+	if(endsWith(*name,".html")) {
+		if((*name)[1] == '+') z=0; //Don't compress template
+		size_t s=0,e,si; bool m; cmatch mr;
+		while((s=bFind(b,"<!--",s)) != NPOS) { //Check for templates
+			si=s, s+=4, e=bFind(b,"-->",s); if(e==NPOS) continue;
+			m=regex_match(b.buf+s, b.buf+e, mr, htmlTpl);
+			s=e+3; if(!m) continue;
+			string hn=mr[1];
+			//Find & insert template
+			CacheEntry *h=srv.getFile("/+"+hn);
+			if(!h) h=srv.getFile("/+"+hn+".html");
+			if(h) b=Append::buf(b.sub(0,si,0), Buffer(h->data,h->fs,0), b.sub(si+mr.length()+7));
+			else z=0,b=Append::buf("File Error '",hn,"'");
 		}
 	}
 	#ifdef ZLIB
@@ -374,9 +383,9 @@ size_t CacheEntry::update(WebServer& s, Buffer b, size_t cs, bool z) {
 	zip=0;
 	#endif
 	//Update Data:
-	size_t ncs=cs+(fs=b.len); bool c = fs && ncs < s.CacheMax;
+	size_t ncs=cs+(fs=b.len); bool c = fs && ncs < srv.CacheMax;
 	delete[] hash; if(c) data=b.buf,db=b.db,hash=md5hash(b); else data=0,db=0,hash=0;
-	if(ncs >= s.CacheMax) cout << "\e[31mCache size exceeded!\e[0m\n";
+	if(ncs >= srv.CacheMax) cout << "\e[31mCache size exceeded!\e[0m\n";
 	return c?ncs:cs;
 }
 CacheEntry::~CacheEntry() { delete[] hash; delete[] db; }

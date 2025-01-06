@@ -1,4 +1,4 @@
-//LightningHTTP v3.6.4 ©2021 Pecacheu; GNU GPL 3.0
+//LightningHTTP ©2025 Pecacheu; GNU GPL 3.0
 #pragma once
 
 #include "http.h"
@@ -26,7 +26,7 @@ struct CacheEntry {
 };
 
 struct ServerOpt {
-	bool chkMode=1; HttpReqFunc onReq=0,postReq=0; HttpPreFunc preReq=0;
+	HttpOptions http; HttpReqFunc postReq=0; bool chkMode=1;
 	void (*setHdr)(HttpRequest& req, HttpResponse& res, stringmap& hd)=0;
 	Buffer (*readCustom)(string f, CacheEntry& c, bool *zip)=0;
 };
@@ -38,7 +38,8 @@ class WebServer {
 	void stop(int e=0); EventLoop evl; const size_t RootLen,CacheMax;
 	CacheEntry *getFile(string n);
 	private: void onReq(HttpRequest& req, HttpResponse& resp);
-	const string Root; HttpServer *sr=0,*ss=0; const ServerOpt o;
+	const string Root; HttpServer *sr=0,*ss=0;
+	ServerOpt o; HttpReqFunc userReq;
 	//SmartCache:
 	size_t SEr=0,CacheSize=0; vector<HttpSocket*> ReadCache;
 	mutex CW,CR; unordered_map<string,CacheEntry> FileCache;
